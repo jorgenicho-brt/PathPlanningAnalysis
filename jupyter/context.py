@@ -2,9 +2,11 @@ import os
 import sys
 from pathlib import Path
 
+PATH_PLANNING_ALG_LIB_PATH = '../PathPlanningAlgorithms/build/lib'
+
 # adding paths to PYTHON path does not work 
 def add_pypl_path():
-    planning_lib_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../build/lib'))
+    planning_lib_path = os.path.abspath(os.path.join(os.path.dirname(__file__), PATH_PLANNING_ALG_LIB_PATH))
     if planning_lib_path not in sys.path: 
         sys.path.insert(0, planning_lib_path)
         print('Added {} to python path'.format(planning_lib_path))
@@ -22,7 +24,7 @@ def add_pypl_path():
 def setup_pypl():
     current_dir_path = Path(os.path.abspath(os.path.join(os.path.dirname(__file__))))
     pypl_slink_path = current_dir_path / 'pypl'
-    pypl_library_path = Path(os.path.abspath(os.path.join(str(current_dir_path), '../build/lib')))
+    pypl_library_path = Path(os.path.abspath(os.path.join(str(current_dir_path), PATH_PLANNING_ALG_LIB_PATH)))
     if not pypl_slink_path.exists():    
         os.symlink(pypl_library_path, pypl_slink_path)
     dir_contents = [f for f in pypl_library_path.iterdir()]
