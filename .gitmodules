@@ -1,0 +1,3 @@
+[submodule "PathPlanningAlgorithms"]
+	path = PathPlanningAlgorithms
+	url = git@github.deere.com:sguil3j/PathPlanningAlgorithms.git
