@@ -2,6 +2,7 @@ import sys
 import utm
 import os
 import copy
+import logging
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -40,8 +41,6 @@ class Box2D:
     def plot(self, axs, offset = np.asarray([0.0, 0.0]), **kwargs):
         points = np.stack(self.points, axis = 0)
         points -= offset
-        #axs.fill(points[:,0], points[:,1], edgecolor = edgecolor, linewidth=linewidth, facecolor = facecolor)
-        # checking optional kwargs
         plot_attributes = copy.deepcopy(self.plot_attributes)
         for k in plot_attributes:
             if k in kwargs:
@@ -153,6 +152,55 @@ class Tracks:
                 dir_vec = arrow_length *unit_vec
                 end_p -= dir_vec
                 axs.arrow(end_p[0], end_p[1], dir_vec[0], dir_vec[1], color = color, width = arrow_width)
+
+class PlannedPath:
+    def __init__(self, name: str, path_points: list[PyPL.WorkPath], valid: bool, **plot_attributes):
+        self.name = name
+        self.path_points : list[PyPL.Pose2D] = []                            
+        self.valid = valid
+        self.plot_attributes = {'color':'blue',
+                       'linewidth': 4,
+                       'linestyle': '-',
+                       'marker': '+',
+                       'markersize' : 10,
+                       'alpha' : 1.0}
+        for k in self.plot_attributes:
+            if k in plot_attributes:
+                self.plot_attributes[k] = plot_attributes[k]
+
+        if len(path_points) == 0:
+            logging.warning('Path "{}" is empty'.format(self.name))
+        
+        for workpath in path_points:
+            for path_segment in workpath.PathSegments:
+                if len(path_segment.Points) == 0:
+                    continue
+                for point in path_segment.Points:
+                    self.path_points.append(point)
+        if len(self.path_points) == 0:
+            logging.warning('No points were found in Path "{}"'.format(self.name))
+
+    def get_points_xy(self, offset : np.array = np.asarray([0.0, 0.0])):
+        xcoord = [coord.Point.E for coord in self.path_points]
+        ycoord = [coord.Point.N for coord in self.path_points]
+        output_xy = np.stack([xcoord, ycoord], axis = 1)
+        output_xy += offset
+        return output_xy   
+
+    def plot(self, axs, offset: np.array, **plot_attributes_modifiers):
+        plot_attributes = copy.deepcopy(self.plot_attributes)
+        for k in plot_attributes:
+            if k in plot_attributes_modifiers:
+                plot_attributes[k] = plot_attributes_modifiers[k] 
+        if not self.valid:
+            plot_attributes['linestyle'] = 'dotted'
+            plot_attributes['marker'] = 'x'
+            plot_attributes['color'] = 'red'
+                
+        output_xy = self.get_points_xy(offset)
+        axs.plot(output_xy[:,0], output_xy[:,1],**plot_attributes)
+
+
 @dataclass
 class EnvironmentObjects:
     large_obstacles: list[Box2D]
@@ -170,15 +218,9 @@ class PlanEnvironmentConstraints:
 class PlanResults:
     start_pose_2d: Pose2D
     end_pose_2d: Pose2D
-    output_path: list[PyPL.LocalPoint]
+    implement_path: PlannedPath
+    tractor_path: PlannedPath
     tracks:  Tracks
-
-    def get_path_xy(self, offset: np.array = np.asarray([0.0, 0.0])):
-        xcoord = [coord.E for coord in self.output_path]
-        ycoord = [coord.N for coord in self.output_path]
-        output_xy = np.stack([xcoord, ycoord], axis = 1)
-        output_xy += offset
-        return output_xy   
 
 def build_planning_env(origin_xy: np.array, zone_number: int, zone_letter: str,
                        environment_objects: EnvironmentObjects,
@@ -238,9 +280,15 @@ def generate_open_field_path(path_end_points : tuple[Pose2D, Pose2D], environmen
     wrapper = PyPL.PointToPointWrapper() 
     wrapper.SetInputs(environment_constraints.environment_inputs) 
     tracks_list = wrapper.Plan()
-    output_path = wrapper.CreatePttoPt_OpenField(path_inputs) 
+    plan_output: PyPL.PlanOutput = wrapper.CreatePttoPt_OpenField(path_inputs) 
+    valid = True if plan_output.error_result.Code == 0 else False
+    if not valid:
+        logging.error('Planning Failed, error msg: {}'.format(plan_output.error_result.Msg))
 
-    return PlanResults(path_end_points[0], path_end_points[1], output_path, Tracks(tracks_list, environment_constraints.origin_xy))
+    origin_xy = environment_constraints.origin_xy
+    return PlanResults(path_end_points[0], path_end_points[1], PlannedPath('Implement', plan_output.ImplementPath, valid),
+                       PlannedPath('Tractor', plan_output.TractorPath, valid, color = 'gray', marker = '+', linewidth = 2, markersize = 20, alpha= 0.5),
+                       Tracks(tracks_list, origin_xy))
 
 def generate_road_network_path(path_end_points : tuple[Pose2D, Pose2D], environment_constraints: PlanEnvironmentConstraints):
 
@@ -254,9 +302,16 @@ def generate_road_network_path(path_end_points : tuple[Pose2D, Pose2D], environm
     wrapper = PyPL.PointToPointWrapper() 
     wrapper.SetInputs(environment_constraints.environment_inputs) 
     tracks_list = wrapper.Plan()
-    output_path = wrapper.CreatePttoPt_RoadNet(path_inputs) 
+    plan_output = wrapper.CreatePttoPt_RoadNet(path_inputs) 
 
-    return PlanResults(path_end_points[0], path_end_points[1], output_path, Tracks(tracks_list, environment_constraints.origin_xy))
+    valid = True if plan_output.error_result.Code == 0 else False
+    if not valid:
+        logging.error('Planning Failed, error msg: {}'.format(plan_output.error_result.Msg))
+
+    origin_xy = environment_constraints.origin_xy
+    return PlanResults(path_end_points[0], path_end_points[1], PlannedPath('Implement', plan_output.ImplementPath, valid),
+                       PlannedPath('Tractor', plan_output.TractorPath, valid, color = 'gray', marker = '+', linewidth = 2, markersize = 20, alpha= 0.5),
+                       Tracks(tracks_list, origin_xy))
 
 def plot_planning_results(plan_env_constraints: PlanEnvironmentConstraints,
                           plan_results: PlanResults,
@@ -272,30 +327,18 @@ def plot_planning_results(plan_env_constraints: PlanEnvironmentConstraints,
     fig.suptitle('Path Planning Results')
     
     origin_xy = plan_env_constraints.origin_xy
-    # tracks_list = plan_results.tracks
-    # for i, track in enumerate(tracks_list):
-    #     shape_points = []
-    #     for p in track.Shape:
-    #         x, y, zn, zl = utm.from_latlon(p.Lat, p.Lon)
-    #         shape_points.append(np.asarray([x, y]))
-    #     shape_points = np.stack(shape_points, axis = 0)
-    #     shape_points = shape_points - origin_xy
-    #     axs[0].plot(shape_points[:,0], shape_points[:,1], '-o', linewidth = 2, color='lightgreen')
     plan_results.tracks.plot(axs[0])
         
     # Plot start and end points
     start_xy = plan_results.start_pose_2d.xy_coords
     end_xy = plan_results.end_pose_2d.xy_coords
     
-    #axs[0].add_patch(plt.Circle((start_xy[0] - origin_xy[0], start_xy[1] - origin_xy[1]), radius = start_circle_radius, fill = True, color = 'green'))
-    #axs[0].add_patch(plt.Circle((end_xy[0] - origin_xy[0], end_xy[1] - origin_xy[1]), radius = end_circle_radius, fill = True, color = 'yellow'))
-
     plan_results.start_pose_2d.plot(axs[0], origin_xy, start_circle_radius, facecolor = 'green')
     plan_results.end_pose_2d.plot(axs[0], origin_xy, end_circle_radius, facecolor = 'purple')
     
-    # Plot trajectory
-    output_xy = plan_results.get_path_xy(output_path_offset)
-    axs[0].plot(output_xy[:,0], output_xy[:,1],'-o', linewidth=2, color='blue')
+    # Plot path
+    plan_results.implement_path.plot(axs[0], output_path_offset)
+    plan_results.tractor_path.plot(axs[0], output_path_offset)
     
     # Plotting boxes
     for box in plan_env_constraints.environment_objects.large_obstacles:
