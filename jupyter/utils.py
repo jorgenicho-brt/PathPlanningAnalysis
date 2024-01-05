@@ -268,7 +268,8 @@ def build_planning_env(origin_xy: np.array, zone_number: int, zone_letter: str,
     return PlanEnvironmentConstraints(origin_xy, environment_objects, obstacles_buffer, environment_inputs)
 
 
-def generate_open_field_path(path_end_points : tuple[Pose2D, Pose2D], environment_constraints: PlanEnvironmentConstraints):
+def generate_open_field_path(path_end_points : tuple[Pose2D, Pose2D], environment_constraints: PlanEnvironmentConstraints,
+                             field_partition_is_impassable = False):
 
     path_inputs = PyPL.PointToPointInputs()
     path_inputs.StartPose = path_end_points[0].latlon_coords
@@ -276,6 +277,7 @@ def generate_open_field_path(path_end_points : tuple[Pose2D, Pose2D], environmen
     path_inputs.EndPose =  path_end_points[1].latlon_coords
     path_inputs.EndAngle = path_end_points[1].angle
     path_inputs.ExtraBuffer = environment_constraints.obstacles_buffer
+    path_inputs.FieldPartitionIsImpassable = field_partition_is_impassable
 
     wrapper = PyPL.PointToPointWrapper() 
     wrapper.SetInputs(environment_constraints.environment_inputs) 
